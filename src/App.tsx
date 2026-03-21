@@ -274,6 +274,61 @@ function App() {
     }
   }
 
+  const handleUndo = () => {
+    // Find the last locked row
+    let lastLocked = -1;
+    for (let r = ROWS - 1; r >= 0; r--) {
+      if (lockedRows[r]) {
+        lastLocked = r;
+        break;
+      }
+    }
+    if (lastLocked === -1) return;
+
+    // Unlock it and move cursor back
+    const newLocked = [...lockedRows];
+    newLocked[lastLocked] = false;
+
+    // Clear any rows after the unlocked one
+    const newBoard = board.map((r) => r.map((t) => ({ ...t })));
+    for (let r = lastLocked + 1; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        newBoard[r][c] = { letter: "", status: "empty" };
+      }
+    }
+
+    setLockedRows(newLocked);
+    setBoard(newBoard);
+    setCurrentRow(lastLocked);
+    setCurrentCol(COLS);
+
+    // Re-fetch suggestions with remaining locked rows, or clear if none left
+    const hasAnyLocked = newLocked.some((l) => l);
+    if (hasAnyLocked) {
+      const constraints = computeConstraints(newBoard, newLocked);
+      setIsLoading(true);
+      findMatchingWords(
+        constraints.word,
+        constraints.include,
+        constraints.exclude
+      )
+        .then((results) => {
+          setSuggestions(results);
+          setHasSearched(true);
+        })
+        .catch(() => {
+          setSuggestions([]);
+          showToast("Failed to fetch suggestions");
+        })
+        .finally(() => setIsLoading(false));
+    } else {
+      setSuggestions([]);
+      setHasSearched(false);
+    }
+  };
+
+  const canUndo = lockedRows.some((l) => l);
+
   const handleClear = () => {
     setBoard(createEmptyBoard());
     setCurrentRow(0);
@@ -390,6 +445,8 @@ function App() {
             onTileClick={handleTileClick}
             shakingRow={shakingRow}
             popCol={popCol}
+            onUndo={handleUndo}
+            canUndo={canUndo}
           />
 
           <Keyboard keyStatuses={keyStatuses} onKeyPress={handleKeyPress} />

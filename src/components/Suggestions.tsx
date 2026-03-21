@@ -5,8 +5,6 @@ interface SuggestionsProps {
   onWordClick: (word: string) => void;
 }
 
-const MAX_DISPLAY = 100;
-
 export function Suggestions({
   words,
   isLoading,
@@ -58,9 +56,6 @@ export function Suggestions({
     );
   }
 
-  const displayed = words.slice(0, MAX_DISPLAY);
-  const remaining = words.length - displayed.length;
-
   return (
     <div className="suggestions">
       <div className="suggestions-header">
@@ -70,7 +65,7 @@ export function Suggestions({
         <span className="suggestions-hint">Click a word to fill your next guess</span>
       </div>
       <div className="suggestions-grid">
-        {displayed.map((word, idx) => (
+        {words.map((word, idx) => (
           <button
             key={idx}
             className="suggestion-word"
@@ -80,11 +75,6 @@ export function Suggestions({
           </button>
         ))}
       </div>
-      {remaining > 0 && (
-        <p className="suggestions-more">
-          and {remaining} more...
-        </p>
-      )}
     </div>
   );
 }
