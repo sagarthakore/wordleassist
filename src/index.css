@@ -3,6 +3,21 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Wordle Colors - Light Mode */
+  --wordle-correct: #6aaa64;
+  --wordle-present: #c9b458;
+  --wordle-absent: #787c7e;
+  --wordle-tbd-border: #878a8c;
+  --wordle-empty-border: #d3d6da;
+  --wordle-text: #1a1a1b;
+  --wordle-text-secondary: #787c7e;
+  --wordle-bg: #ffffff;
+  --wordle-key-bg: #d3d6da;
+  --wordle-key-text: #1a1a1b;
+  --wordle-border: #d3d6da;
+  --squares-bg: rgba(0, 0, 0, 0.08);
+
+  /* shadcn/ui theme vars */
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -36,10 +51,24 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
-  --squares-bg: rgba(0, 0, 0, 0.2);
 }
 
 .dark {
+  /* Wordle Colors - Dark Mode */
+  --wordle-correct: #538d4e;
+  --wordle-present: #b59f3b;
+  --wordle-absent: #3a3a3c;
+  --wordle-tbd-border: #565758;
+  --wordle-empty-border: #3a3a3c;
+  --wordle-text: #d7dadc;
+  --wordle-text-secondary: #818384;
+  --wordle-bg: #121213;
+  --wordle-key-bg: #818384;
+  --wordle-key-text: #d7dadc;
+  --wordle-border: #3a3a3c;
+  --squares-bg: rgba(255, 255, 255, 0.08);
+
+  /* shadcn/ui theme vars */
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.145 0 0);
@@ -72,9 +101,7 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(0.269 0 0);
   --sidebar-ring: oklch(0.439 0 0);
-  --squares-bg: rgba(255, 255, 255, 0.2);
 }
-
 
 @theme inline {
   --color-background: var(--background);
@@ -113,7 +140,6 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-  --color-squares-bg: var(--squares-bg);
 }
 
 @layer base {
@@ -121,34 +147,22 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--wordle-bg);
+    color: var(--wordle-text);
+    font-family: "Clear Sans", "Helvetica Neue", Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
   }
 }
 
-/*
-Set the default cursor for buttons.
-*/
-button:not(:disabled), [type="button"]:not(:disabled), [type="reset"]:not(:disabled), [type="submit"]:not(:disabled) {
-    cursor: pointer;
+button:not(:disabled),
+[type="button"]:not(:disabled),
+[type="reset"]:not(:disabled),
+[type="submit"]:not(:disabled) {
+  cursor: pointer;
 }
 
-/*
-Make sure disabled buttons don't get the pointer cursor.
-*/
 :disabled {
-    cursor: default;
-}
-
-input.wordle {
-  font-size: 1.5rem;
-  line-height: 2rem;
-  letter-spacing: 0.1rem;
-}
-
-.text-success {
-  color: #00bc8c;
-}
-
-.text-warning {
-  color: #F39C12;
+  cursor: default;
 }

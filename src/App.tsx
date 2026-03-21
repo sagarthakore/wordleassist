@@ -1,257 +1,408 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./App.css";
 import "./styles/squares.css";
 import { ThemeProvider } from "./components/theme-provider";
 import { ModeToggle } from "./components/mode-toggle";
-import { Input } from "./components/ui/input";
-import { Button } from "./components/ui/button";
-import { useNavigate, useParams } from "react-router-dom";
+import { GameBoard } from "./components/GameBoard";
+import { Keyboard } from "./components/Keyboard";
+import { Suggestions } from "./components/Suggestions";
 import { findMatchingWords } from "./services/wordService";
 
-function App() {
-  // Get route parameters
-  const { word = "", include = "", exclude = "" } = useParams();
-  const navigate = useNavigate();
+export type TileStatus = "empty" | "tbd" | "absent" | "present" | "correct";
+export interface TileData {
+  letter: string;
+  status: TileStatus;
+}
 
-  const [letters, setWord] = useState(word || "");
-  const [includeLetters, setIncludeLetters] = useState(include || "");
-  const [excludeLetters, setExcludeLetters] = useState(exclude || "");
-  const [results, setResults] = useState<string[]>([]);
-  const [resultCount, setResultCount] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false); // New state to track if search was performed
-  const [error, setError] = useState<string | null>(null);
+const ROWS = 6;
+const COLS = 5;
 
-  // Update route when form values change
-  useEffect(() => {
-    // Only update URL if values have actually changed from params
-    if (
-      letters !== word ||
-      includeLetters !== include ||
-      excludeLetters !== exclude
-    ) {
-      // Construct URL path with optional parameters
-      let path = "/";
-      if (letters || includeLetters || excludeLetters) {
-        path += `${letters || "_"}`;
-        if (includeLetters || excludeLetters) {
-          path += `/${includeLetters || "_"}`;
-          if (excludeLetters) {
-            path += `/${excludeLetters}`;
-          }
-        }
+function createEmptyBoard(): TileData[][] {
+  return Array.from({ length: ROWS }, () =>
+    Array.from({ length: COLS }, () => ({
+      letter: "",
+      status: "empty" as TileStatus,
+    }))
+  );
+}
+
+function computeConstraints(
+  board: TileData[][],
+  lockedRows: boolean[]
+): { word: string; include: string; exclude: string } {
+  const greenPattern = Array(COLS).fill("_");
+  const includePatterns: string[] = [];
+  const excludeSet = new Set<string>();
+  const nonExcludeSet = new Set<string>();
+
+  for (let r = 0; r < ROWS; r++) {
+    if (!lockedRows[r]) continue;
+
+    const rowInclude = Array(COLS).fill("_");
+    let hasYellow = false;
+
+    for (let c = 0; c < COLS; c++) {
+      const tile = board[r][c];
+      const letter = tile.letter.toLowerCase();
+
+      if (tile.status === "correct") {
+        greenPattern[c] = letter;
+        nonExcludeSet.add(letter);
+      } else if (tile.status === "present") {
+        rowInclude[c] = letter;
+        hasYellow = true;
+        nonExcludeSet.add(letter);
+      } else if (tile.status === "absent") {
+        excludeSet.add(letter);
       }
-      navigate(path, { replace: true });
     }
-  }, [
-    letters,
-    includeLetters,
-    excludeLetters,
-    navigate,
-    word,
-    include,
-    exclude,
-  ]);
+
+    if (hasYellow) {
+      includePatterns.push(rowInclude.join(""));
+    }
+  }
+
+  // Don't exclude letters that are also green or yellow somewhere
+  for (const letter of nonExcludeSet) {
+    excludeSet.delete(letter);
+  }
+
+  return {
+    word: greenPattern.join(""),
+    include: includePatterns.join(","),
+    exclude: Array.from(excludeSet).join(""),
+  };
+}
+
+function App() {
+  const [board, setBoard] = useState<TileData[][]>(createEmptyBoard());
+  const [currentRow, setCurrentRow] = useState(0);
+  const [currentCol, setCurrentCol] = useState(0);
+  const [lockedRows, setLockedRows] = useState<boolean[]>(
+    Array(ROWS).fill(false)
+  );
+
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
+
+  const [toast, setToast] = useState<string | null>(null);
+  const [shakingRow, setShakingRow] = useState<number | null>(null);
+  const [popCol, setPopCol] = useState<number | null>(null);
+  const [howToOpen, setHowToOpen] = useState(false);
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    setTimeout(() => setToast(null), 2000);
+  }, []);
+
+  const triggerShake = useCallback((row: number) => {
+    setShakingRow(row);
+    setTimeout(() => setShakingRow(null), 600);
+  }, []);
+
+  const triggerPop = useCallback((col: number) => {
+    setPopCol(col);
+    setTimeout(() => setPopCol(null), 150);
+  }, []);
+
+  const handleKeyPress = useCallback(
+    (key: string) => {
+      if (currentRow >= ROWS) return;
+      if (lockedRows[currentRow]) return;
+
+      if (key === "ENTER") {
+        if (currentCol < COLS) {
+          showToast("Not enough letters");
+          triggerShake(currentRow);
+          return;
+        }
+
+        // Check all tiles have been colored
+        const rowTiles = board[currentRow];
+        const hasUncolored = rowTiles.some(
+          (t) => t.status === "tbd" || t.status === "empty"
+        );
+        if (hasUncolored) {
+          showToast("Click tiles to set their colors");
+          triggerShake(currentRow);
+          return;
+        }
+
+        // Lock the row
+        const newLocked = [...lockedRows];
+        newLocked[currentRow] = true;
+
+        // Compute constraints with the new locked state
+        const constraints = computeConstraints(board, newLocked);
+
+        // Update state
+        setLockedRows(newLocked);
+        setCurrentRow(currentRow + 1);
+        setCurrentCol(0);
+
+        // Fetch suggestions
+        setIsLoading(true);
+        findMatchingWords(
+          constraints.word,
+          constraints.include,
+          constraints.exclude
+        )
+          .then((results) => {
+            setSuggestions(results);
+            setHasSearched(true);
+          })
+          .catch(() => {
+            setSuggestions([]);
+            setHasSearched(true);
+            showToast("Failed to fetch suggestions");
+          })
+          .finally(() => setIsLoading(false));
+
+        return;
+      }
+
+      if (key === "BACKSPACE") {
+        if (currentCol > 0) {
+          const newBoard = board.map((row) => row.map((t) => ({ ...t })));
+          newBoard[currentRow][currentCol - 1] = {
+            letter: "",
+            status: "empty",
+          };
+          setBoard(newBoard);
+          setCurrentCol(currentCol - 1);
+        }
+        return;
+      }
+
+      // Letter key
+      if (currentCol < COLS && /^[A-Z]$/.test(key)) {
+        const newBoard = board.map((row) => row.map((t) => ({ ...t })));
+        newBoard[currentRow][currentCol] = { letter: key, status: "absent" };
+        setBoard(newBoard);
+        setCurrentCol(currentCol + 1);
+        triggerPop(currentCol);
+      }
+    },
+    [
+      currentRow,
+      currentCol,
+      board,
+      lockedRows,
+      showToast,
+      triggerShake,
+      triggerPop,
+    ]
+  );
+
+  // Physical keyboard handler
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.repeat) return;
+
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleKeyPress("ENTER");
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        handleKeyPress("BACKSPACE");
+      } else if (/^[a-zA-Z]$/.test(e.key)) {
+        handleKeyPress(e.key.toUpperCase());
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleKeyPress]);
+
+  const handleTileClick = useCallback(
+    (row: number, col: number) => {
+      if (row !== currentRow || lockedRows[row]) return;
+      if (board[row][col].letter === "") return;
+
+      const newBoard = board.map((r) => r.map((t) => ({ ...t })));
+      const tile = newBoard[row][col];
+
+      // Cycle: absent → present → correct → absent
+      const cycle: TileStatus[] = ["absent", "present", "correct"];
+      const idx = cycle.indexOf(tile.status);
+      tile.status = cycle[(idx + 1) % cycle.length];
+
+      setBoard(newBoard);
+    },
+    [currentRow, board, lockedRows]
+  );
+
+  const handleSuggestionClick = useCallback(
+    (word: string) => {
+      if (currentRow >= ROWS || lockedRows[currentRow]) return;
+
+      const newBoard = board.map((r) => r.map((t) => ({ ...t })));
+      for (let c = 0; c < COLS && c < word.length; c++) {
+        newBoard[currentRow][c] = {
+          letter: word[c].toUpperCase(),
+          status: "absent",
+        };
+      }
+      // Clear remaining cols if word is shorter
+      for (let c = word.length; c < COLS; c++) {
+        newBoard[currentRow][c] = { letter: "", status: "empty" };
+      }
+      setBoard(newBoard);
+      setCurrentCol(Math.min(word.length, COLS));
+    },
+    [currentRow, board, lockedRows]
+  );
+
+  // Compute keyboard statuses from locked rows
+  const keyStatuses = new Map<string, TileStatus>();
+  for (let r = 0; r < ROWS; r++) {
+    if (!lockedRows[r]) continue;
+    for (let c = 0; c < COLS; c++) {
+      const tile = board[r][c];
+      const key = tile.letter;
+      if (!key) continue;
+
+      const current = keyStatuses.get(key);
+      const priority: TileStatus[] = ["absent", "present", "correct"];
+      const currentPriority = current ? priority.indexOf(current) : -1;
+      const newPriority = priority.indexOf(tile.status);
+      if (newPriority > currentPriority) {
+        keyStatuses.set(key, tile.status);
+      }
+    }
+  }
 
   const handleClear = () => {
-    setWord("");
-    setIncludeLetters("");
-    setExcludeLetters("");
-    setResults([]);
-    setResultCount(0);
-    setError(null);
-    setHasSearched(false); // Reset search state
-    // Clear route params by navigating to root
-    navigate("/", { replace: true });
-  };
-
-  const handleFindWords = async () => {
-    // Construct URL path with optional parameters
-    let path = "/";
-    if (letters || includeLetters || excludeLetters) {
-      path += `${letters || "_"}`;
-      if (includeLetters || excludeLetters) {
-        path += `/${includeLetters || "_"}`;
-        if (excludeLetters) {
-          path += `/${excludeLetters}`;
-        }
-      }
-    }
-    navigate(path);
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const response = await findMatchingWords(
-        letters,
-        includeLetters,
-        excludeLetters
-      );
-      setResults(response);
-      setResultCount(response.length);
-      setHasSearched(true); // Mark that a search has been performed
-    } catch (err) {
-      setError("Something went wrong...");
-      setResults([]);
-      setResultCount(0);
-      setHasSearched(true); // Mark that a search has been performed, even if it failed
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Handle letters word input change
-  const handleWordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^a-zA-Z_]/g, "").toUpperCase();
-    setWord(value);
-  };
-
-  // Handle include letters input change
-  const handleIncludeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^a-zA-Z_]/g, "").toUpperCase();
-    setIncludeLetters(value);
-  };
-
-  // Handle exclude letters input change
-  const handleExcludeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase();
-    setExcludeLetters(value);
+    setBoard(createEmptyBoard());
+    setCurrentRow(0);
+    setCurrentCol(0);
+    setLockedRows(Array(ROWS).fill(false));
+    setSuggestions([]);
+    setHasSearched(false);
   };
 
   return (
     <ThemeProvider defaultTheme="system" storageKey="wordleassist-theme">
-      <div className="container mx-auto px-4">
-        <h1 className="scroll-m-20 text-4xl font-bold tracking-tight lg:text-5xl text-center mt-8 mb-2">
-          Wordle Assist
-        </h1>
-        <span className="text-muted-foreground">
-          Click{" "}
-          <a
-            className="text-success"
-            target="_blank"
-            href="https://www.nytimes.com/games/wordle/index.html"
+      <div className="wordle-app">
+        <header className="wordle-header">
+          <div className="wordle-header-left" />
+          <div className="wordle-header-center">
+            <h1 className="wordle-title">Wordle Assist</h1>
+            <span className="wordle-subtitle">
+              Click{" "}
+              <a
+                className="wordle-link"
+                target="_blank"
+                rel="noopener noreferrer"
+                href="https://www.nytimes.com/games/wordle/index.html"
+              >
+                here
+              </a>{" "}
+              to play Wordle
+            </span>
+          </div>
+          <div className="wordle-header-right">
+            <button
+              className="header-btn"
+              onClick={handleClear}
+              title="Reset board"
+              aria-label="Reset board"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 12a9 9 0 1 1 9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                <path d="M3 22v-6h6" />
+              </svg>
+            </button>
+            <ModeToggle />
+          </div>
+        </header>
+
+        {toast && <div className="wordle-toast">{toast}</div>}
+
+        <div className="wordle-how-to">
+          <button
+            className="how-to-toggle"
+            onClick={() => setHowToOpen(!howToOpen)}
+            aria-expanded={howToOpen}
           >
-            here
-          </a>{" "}
-          to play Wordle
-        </span>
-        <div className="absolute top-4 right-4">
-          <ModeToggle />
-        </div>
-        <div className="flex flex-col items-center mt-8">
-          <div className="flex w-full flex-col items-center text-left space-y-4 mb-6">
-            <div className="w-full max-w-2xl mt-6">
-              <Input
-                id="letters"
-                type="text"
-                placeholder="Enter letters"
-                value={letters}
-                onChange={handleWordChange}
-                className="wordle w-full text-2xl py-8 border-4 focus:border-4 rounded-xl"
-              />
-              <span className="text mt-1 italic">
-                Enter letters that appear in{" "}
-                <span className="text-success">green</span>. Use underscore for
-                letters not in <span className="text-success">green</span>.
-                Example: For <span className="text-warning">B</span>
-                <span className="text-success">O</span>A
-                <span className="text-warning">R</span>D, enter "_O___".
-              </span>
-            </div>
-
-            <div className="w-full max-w-2xl mt-6">
-              <Input
-                id="exclude"
-                type="text"
-                placeholder="Enter letters to exclude"
-                value={excludeLetters}
-                onChange={handleExcludeChange}
-                className="wordle w-full text-2xl py-8 border-4 focus:border-4 rounded-xl"
-              />
-              <span className="text mt-1 italic">
-                Enter letters that appear in grey. No need for underscore.
-                Example: For <span className="text-warning">B</span>
-                <span className="text-success">O</span>A
-                <span className="text-warning">R</span>D, enter "AD".
-              </span>
-            </div>
-
-            <div className="w-full max-w-2xl mt-6">
-              <Input
-                id="include"
-                type="text"
-                placeholder="Enter letters to include"
-                value={includeLetters}
-                onChange={handleIncludeChange}
-                className="wordle w-full text-2xl py-8 border-4 focus:border-4 rounded-xl"
-              />
-              <span className="text mt-1 italic">
-                Enter letters that appear in{" "}
-                <span className="text-warning">yellow</span>. Use underscore for
-                letters not in <span className="text-warning">yellow</span>.
-                Example: For <span className="text-warning">B</span>
-                <span className="text-success">O</span>A
-                <span className="text-warning">R</span>D, enter "B__R_".
-              </span>
-            </div>
-
-            <div className="flex space-x-4 max-w-2xl mt-8">
-              <Button
-                onClick={handleFindWords}
-                className="flex-1 py-6 text-xl"
-                size="lg"
-                disabled={isLoading || letters.trim() === ""}
-              >
-                {isLoading ? "SEARCHING..." : "FIND WORDS"}
-              </Button>
-              <Button
-                onClick={handleClear}
-                variant="outline"
-                className="py-6 text-xl"
-                size="lg"
-                disabled={isLoading || letters.trim() === ""}
-              >
-                CLEAR
-              </Button>
+            <h2 className="how-to-title">How to use Wordle Assist</h2>
+            <span className={`how-to-chevron ${howToOpen ? "how-to-chevron--open" : ""}`} />
+          </button>
+          <div className={`how-to-content ${howToOpen ? "how-to-content--open" : ""}`}>
+            <div className="how-to-inner">
+              <ol className="how-to-steps">
+                <li>
+                  Play{" "}
+                  <a
+                    href="https://www.nytimes.com/games/wordle/index.html"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="wordle-link"
+                  >
+                    Wordle
+                  </a>{" "}
+                  and enter your guess below using the keyboard.
+                </li>
+                <li>
+                  <strong>Click each tile</strong> to match the colors Wordle
+                  gave you:{" "}
+                  <span className="how-to-color how-to-color--absent">gray</span>{" "}
+                  (not in word),{" "}
+                  <span className="how-to-color how-to-color--present">
+                    yellow
+                  </span>{" "}
+                  (wrong spot),{" "}
+                  <span className="how-to-color how-to-color--correct">
+                    green
+                  </span>{" "}
+                  (correct spot).
+                </li>
+                <li>
+                  Press <strong>Enter</strong> to submit. We'll suggest possible
+                  words for your next guess.
+                </li>
+                <li>
+                  Click a suggestion to auto-fill your next row. Repeat until
+                  you solve it!
+                </li>
+              </ol>
             </div>
           </div>
-
-          {/* Results section */}
-          {hasSearched && !isLoading && (
-            <div className="w-full max-w-2xl mt-8 border rounded-xl shadow-sm overflow-hidden">
-              <div className="p-6 bg-card">
-                {error ? (
-                  <div>
-                    <p className="text-destructive p-2 text-center text-4xl">
-                      {error}
-                    </p>
-                  </div>
-                ) : resultCount > 0 ? (
-                  <>
-                    <div className="flex flex-wrap gap-4 justify-center">
-                      {results.map((word, index) => (
-                        <div
-                          key={index}
-                          className="p-2 text-center text-4xl uppercase font-mono font-bold"
-                        >
-                          {word}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-center">
-                    <p className="text-xl">
-                      No valid words can be formed. Try different letters.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
+
+        <main className="wordle-main">
+          <GameBoard
+            board={board}
+            currentRow={currentRow}
+            lockedRows={lockedRows}
+            onTileClick={handleTileClick}
+            shakingRow={shakingRow}
+            popCol={popCol}
+          />
+
+          <Keyboard keyStatuses={keyStatuses} onKeyPress={handleKeyPress} />
+
+          <Suggestions
+            words={suggestions}
+            isLoading={isLoading}
+            hasSearched={hasSearched}
+            onWordClick={handleSuggestionClick}
+          />
+        </main>
       </div>
+
       <ul className="squares">
         <li></li>
         <li></li>
