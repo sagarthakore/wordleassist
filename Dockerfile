@@ -13,9 +13,6 @@ RUN npm ci
 # Copy project files
 COPY . .
 
-# Build the application
-RUN npm run build
-
 # Expose port 5173 (serve's default port)
 EXPOSE 5173
 
