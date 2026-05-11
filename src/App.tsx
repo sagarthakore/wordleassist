@@ -85,6 +85,7 @@ function App() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [toast, setToast] = useState<string | null>(null);
   const [shakingRow, setShakingRow] = useState<number | null>(null);
@@ -105,6 +106,34 @@ function App() {
     setPopCol(col);
     setTimeout(() => setPopCol(null), 150);
   }, []);
+
+  const fetchSuggestions = useCallback(
+    (boardArg: TileData[][], lockedArg: boolean[]) => {
+      const constraints = computeConstraints(boardArg, lockedArg);
+      setError(null);
+      setIsLoading(true);
+      findMatchingWords(
+        constraints.word,
+        constraints.include,
+        constraints.exclude
+      )
+        .then((results) => {
+          setSuggestions(results);
+          setHasSearched(true);
+        })
+        .catch((err: unknown) => {
+          setSuggestions([]);
+          setHasSearched(true);
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Couldn't load suggestions. Please try again."
+          );
+        })
+        .finally(() => setIsLoading(false));
+    },
+    []
+  );
 
   const handleKeyPress = useCallback(
     (key: string) => {
@@ -133,31 +162,12 @@ function App() {
         const newLocked = [...lockedRows];
         newLocked[currentRow] = true;
 
-        // Compute constraints with the new locked state
-        const constraints = computeConstraints(board, newLocked);
-
         // Update state
         setLockedRows(newLocked);
         setCurrentRow(currentRow + 1);
         setCurrentCol(0);
 
-        // Fetch suggestions
-        setIsLoading(true);
-        findMatchingWords(
-          constraints.word,
-          constraints.include,
-          constraints.exclude
-        )
-          .then((results) => {
-            setSuggestions(results);
-            setHasSearched(true);
-          })
-          .catch(() => {
-            setSuggestions([]);
-            setHasSearched(true);
-            showToast("Failed to fetch suggestions");
-          })
-          .finally(() => setIsLoading(false));
+        fetchSuggestions(board, newLocked);
 
         return;
       }
@@ -192,6 +202,7 @@ function App() {
       showToast,
       triggerShake,
       triggerPop,
+      fetchSuggestions,
     ]
   );
 
@@ -305,25 +316,11 @@ function App() {
     // Re-fetch suggestions with remaining locked rows, or clear if none left
     const hasAnyLocked = newLocked.some((l) => l);
     if (hasAnyLocked) {
-      const constraints = computeConstraints(newBoard, newLocked);
-      setIsLoading(true);
-      findMatchingWords(
-        constraints.word,
-        constraints.include,
-        constraints.exclude
-      )
-        .then((results) => {
-          setSuggestions(results);
-          setHasSearched(true);
-        })
-        .catch(() => {
-          setSuggestions([]);
-          showToast("Failed to fetch suggestions");
-        })
-        .finally(() => setIsLoading(false));
+      fetchSuggestions(newBoard, newLocked);
     } else {
       setSuggestions([]);
       setHasSearched(false);
+      setError(null);
     }
   };
 
@@ -336,7 +333,10 @@ function App() {
     setLockedRows(Array(ROWS).fill(false));
     setSuggestions([]);
     setHasSearched(false);
+    setError(null);
   };
+
+  const handleRetry = () => fetchSuggestions(board, lockedRows);
 
   return (
     <ThemeProvider defaultTheme="system" storageKey="wordleassist-theme">
@@ -455,6 +455,8 @@ function App() {
             words={suggestions}
             isLoading={isLoading}
             hasSearched={hasSearched}
+            error={error}
+            onRetry={handleRetry}
             onWordClick={handleSuggestionClick}
           />
         </main>

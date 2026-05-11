@@ -538,6 +538,52 @@ button.key.key--wide {
   font-size: 0.9rem;
 }
 
+.suggestions--error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 16px;
+  margin: 0 4px;
+  border: 1px solid var(--wordle-absent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wordle-absent) 12%, transparent);
+  text-align: center;
+}
+
+.suggestions-error-icon {
+  color: var(--wordle-absent);
+  flex-shrink: 0;
+}
+
+.suggestions-error-message {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--wordle-text);
+  line-height: 1.5;
+  max-width: 360px;
+}
+
+.suggestions-retry {
+  margin-top: 4px;
+  padding: 8px 18px;
+  border: 1px solid var(--wordle-empty-border);
+  border-radius: 4px;
+  background: var(--wordle-key-bg);
+  color: var(--wordle-key-text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.suggestions-retry:hover {
+  opacity: 0.85;
+}
+
 .suggestions-header {
   display: flex;
   justify-content: space-between;
